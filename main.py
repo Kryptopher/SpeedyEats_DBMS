@@ -109,11 +109,9 @@ class InventoryManagement:
         self.cursor.execute('''CREATE TABLE IF NOT EXISTS location_inventory (
             location_inventory_id INTEGER PRIMARY KEY,
             location_id INTEGER,
-            product_id INTEGER,
             quantity INTEGER,
             last_updated TEXT,
-            FOREIGN KEY(location_id) REFERENCES location(location_id),
-            FOREIGN KEY(product_id) REFERENCES product(product_id)
+            FOREIGN KEY(location_id) REFERENCES location(location_id)
         )''')
 
         # Sales Table
@@ -253,13 +251,13 @@ class InventoryManagement:
                                     (warehouse_id, location_id, quantity, movement_date))
             elif table == 'location_inventory':
                 location_id = int(input("Enter location ID: "))
-                product_id = int(input("Enter product ID: "))
+                
                 quantity = int(input("Enter quantity: "))
                 last_updated = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 self.cursor.execute("""INSERT INTO location_inventory 
-                                    (location_id, product_id, quantity, last_updated) 
-                                    VALUES (?, ?, ?, ?)""", 
-                                    (location_id, product_id, quantity, last_updated))
+                                    (location_id, quantity, last_updated) 
+                                    VALUES (?, ?, ?)""", 
+                                    (location_id, quantity, last_updated))
             elif table == 'sales':
                 location_id = int(input("Enter location ID: "))
                 user_id = int(input("Enter user ID: "))
