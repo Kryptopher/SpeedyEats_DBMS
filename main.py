@@ -1,283 +1,530 @@
-from create_tables import create_tables
-from display import display_table
-
-
 import sqlite3
-
-# Database connection setup
-def connect_db():
-    return sqlite3.connect("speedy_eats.db")
-
-# Common Input Helper
-def get_input(fields):
-    return tuple(input(f"Enter {field}: ") for field in fields)
-
-# Operations for each table
-def add_record(cursor, table, fields):
-    values = get_input(fields)
-    placeholders = ", ".join(["?"] * len(fields))
-    query = f"INSERT INTO {table} ({', '.join(fields)}) VALUES ({placeholders})"
-    cursor.execute(query, values)
-    print(f"Record added to {table}.")
-
-def update_record(cursor, table, id_field, id_value, fields):
-    values = get_input(fields)
-    set_clause = ", ".join([f"{field} = ?" for field in fields])
-    query = f"UPDATE {table} SET {set_clause} WHERE {id_field} = ?"
-    cursor.execute(query, (*values, id_value))
-    print(f"Record in {table} updated.")
-
-def delete_record(cursor, table, id_field):
-    id_value = input(f"Enter {id_field} to delete: ")
-    query = f"DELETE FROM {table} WHERE {id_field} = ?"
-    cursor.execute(query, (id_value,))
-    print(f"Record deleted from {table}.")
+import datetime
 
 
+class InventoryManagement:
+    def __init__(self, db_name='inventory.db'):
+        self.conn = sqlite3.connect(db_name)
+        self.cursor = self.conn.cursor()
+        self.cursor.execute("PRAGMA foreign_keys = ON")
+        self.create_tables()
+        self.tables = [
+            'supplier', 'purchase', 'product', 'nutrition', 'warehouse', 
+            'warehouse_inventory', 'movement', 'location', 'location_inventory', 
+            'user', 'sales', 'product_purchased', 'warehouse_product', 
+            'movement_product', 'location_product', 'sales_product'
+        ]
+
+    def create_tables(self):
+        # Supplier Table
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS supplier (
+            supplier_id INTEGER PRIMARY KEY,
+            name TEXT,
+            address TEXT
+        )''')
+
+        # Warehouse Table
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS warehouse (
+            warehouse_id INTEGER PRIMARY KEY,
+            name TEXT,
+            address TEXT
+        )''')
+
+        # Location Table
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS location (
+            location_id INTEGER PRIMARY KEY,
+            name TEXT,
+            type TEXT,
+            address TEXT,
+            ip_address TEXT
+        )''')
+
+        # Nutrition Table
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS nutrition (
+            nutrition_id INTEGER PRIMARY KEY,
+            shelf_life TEXT,
+            serving TEXT,
+            calories REAL,
+            protein REAL,
+            fat REAL,
+            sugar REAL,
+            carbs REAL
+        )''')
+
+        # User Table
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS user (
+            user_id INTEGER PRIMARY KEY,
+            name TEXT,
+            email TEXT,
+            type TEXT,
+            address TEXT,
+            phone_number TEXT
+        )''')
+
+        # Purchase Table
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS purchase (
+            purchase_id INTEGER PRIMARY KEY,
+            supplier_id INTEGER,
+            warehouse_id INTEGER,
+            quantity INTEGER,
+            purchase_date TEXT,
+            FOREIGN KEY(supplier_id) REFERENCES supplier(supplier_id),
+            FOREIGN KEY(warehouse_id) REFERENCES warehouse(warehouse_id)
+        )''')
+
+        # Products Table
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS product (
+            product_id INTEGER PRIMARY KEY,
+            product_name TEXT,
+            brand TEXT,
+            category TEXT,
+            cost_price REAL,
+            supplier_id INTEGER,
+            nutrition_id INTEGER,
+            FOREIGN KEY(supplier_id) REFERENCES supplier(supplier_id) ON DELETE RESTRICT,
+            FOREIGN KEY(nutrition_id) REFERENCES nutrition(nutrition_id) ON DELETE RESTRICT
+        )''')
+
+        # Warehouse Inventory Table
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS warehouse_inventory (
+            warehouse_inventory_id INTEGER PRIMARY KEY,
+            warehouse_id INTEGER,
+            quantity INTEGER,
+            last_updated TEXT,
+            FOREIGN KEY(warehouse_id) REFERENCES warehouse(warehouse_id)
+        )''')
+
+        # Movement Table
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS movement (
+            movement_id INTEGER PRIMARY KEY,
+            warehouse_id INTEGER,
+            location_id INTEGER,
+            quantity INTEGER,
+            movement_date TEXT,
+            FOREIGN KEY(warehouse_id) REFERENCES warehouse(warehouse_id),
+            FOREIGN KEY(location_id) REFERENCES location(location_id)
+        )''')
+
+        # Location Inventory Table
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS location_inventory (
+            location_inventory_id INTEGER PRIMARY KEY,
+            location_id INTEGER,
+            product_id INTEGER,
+            quantity INTEGER,
+            last_updated TEXT,
+            FOREIGN KEY(location_id) REFERENCES location(location_id),
+            FOREIGN KEY(product_id) REFERENCES product(product_id)
+        )''')
+
+        # Sales Table
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS sales (
+            sales_id INTEGER PRIMARY KEY,
+            location_id INTEGER,
+            user_id INTEGER,
+            quantity INTEGER,
+            sales_date TEXT,
+            FOREIGN KEY(location_id) REFERENCES location(location_id),
+            FOREIGN KEY(user_id) REFERENCES user(user_id)
+        )''')
 
 
-# Menu Options
-def manage_products(cursor):
-    print("\nManaging Products")
-    fields = ["product_name", "category", "brand", "supplier_id", "cost_price", "retail_price", "nutrition_id"]
-    id_field = "product_id"
-    table = "Products"
-    manage_table(cursor, table, id_field, fields)
+
+        # Junction Tables
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS product_purchased (
+            product_id INTEGER,
+            purchase_id INTEGER,
+            PRIMARY KEY(product_id, purchase_id),
+            FOREIGN KEY(product_id) REFERENCES product(product_id) ON DELETE RESTRICT,
+            FOREIGN KEY(purchase_id) REFERENCES purchase(purchase_id) ON DELETE CASCADE
+        )''')
+
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS warehouse_product (
+            product_id INTEGER,
+            warehouse_inventory_id INTEGER,
+            PRIMARY KEY(product_id, warehouse_inventory_id),
+            FOREIGN KEY(product_id) REFERENCES product(product_id),
+            FOREIGN KEY(warehouse_inventory_id) REFERENCES warehouse_inventory(warehouse_inventory_id)
+        )''')
+
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS movement_product (
+            product_id INTEGER,
+            movement_id INTEGER,
+            PRIMARY KEY(product_id, movement_id),
+            FOREIGN KEY(product_id) REFERENCES product(product_id),
+            FOREIGN KEY(movement_id) REFERENCES movement(movement_id)
+        )''')
+
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS location_product (
+            product_id INTEGER,
+            location_inventory_id INTEGER,
+            PRIMARY KEY(product_id, location_inventory_id),
+            FOREIGN KEY(product_id) REFERENCES product(product_id),
+            FOREIGN KEY(location_inventory_id) REFERENCES location_inventory(location_inventory_id)
+        )''')
+
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS sales_product (
+            product_id INTEGER,
+            sales_id INTEGER,
+            PRIMARY KEY(product_id, sales_id),
+            FOREIGN KEY(product_id) REFERENCES product(product_id),
+            FOREIGN KEY(sales_id) REFERENCES sales(sales_id)
+        )''')
+
+        self.conn.commit()
+
+    def insert_record(self, table):
+        print(f"\nInserting record into {table}")
+        try:
+            if table == 'supplier':
+                name = input("Enter supplier name: ")
+                address = input("Enter supplier address: ")
+                self.cursor.execute("INSERT INTO supplier (name, address) VALUES (?, ?)", 
+                                    (name, address))
+            elif table == 'warehouse':
+                name = input("Enter warehouse name: ")
+                address = input("Enter warehouse address: ")
+                self.cursor.execute("INSERT INTO warehouse (name, address) VALUES (?, ?)", 
+                                    (name, address))
+            elif table == 'location':
+                name = input("Enter location name: ")
+                type_ = input("Enter location type: ")
+                address = input("Enter location address: ")
+                ip_address = input("Enter IP address: ")
+                self.cursor.execute("INSERT INTO location (name, type, address, ip_address) VALUES (?, ?, ?, ?)", 
+                                    (name, type_, address, ip_address))
+            elif table == 'nutrition':
+                shelf_life = input("Enter shelf life: ")
+                serving = input("Enter serving size: ")
+                calories = float(input("Enter calories: "))
+                protein = float(input("Enter protein: "))
+                fat = float(input("Enter fat: "))
+                sugar = float(input("Enter sugar: "))
+                carbs = float(input("Enter carbs: "))
+                self.cursor.execute("""INSERT INTO nutrition 
+                                    (shelf_life, serving, calories, protein, fat, sugar, carbs) 
+                                    VALUES (?, ?, ?, ?, ?, ?, ?)""", 
+                                    (shelf_life, serving, calories, protein, fat, sugar, carbs))
+            elif table == 'user':
+                name = input("Enter user name: ")
+                email = input("Enter user email: ")
+                type_ = input("Enter user type: ")
+                address = input("Enter user address: ")
+                phone_number = input("Enter phone number: ")
+                self.cursor.execute("""INSERT INTO user 
+                                    (name, email, type, address, phone_number) 
+                                    VALUES (?, ?, ?, ?, ?)""", 
+                                    (name, email, type_, address, phone_number))
+            elif table == 'purchase':
+                supplier_id = int(input("Enter supplier ID: "))
+                warehouse_id = int(input("Enter warehouse ID: "))
+                quantity = int(input("Enter purchase quantity: "))
+                purchase_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                self.cursor.execute("""INSERT INTO purchase 
+                                    (supplier_id, warehouse_id, quantity, purchase_date) 
+                                    VALUES (?, ?, ?, ?)""", 
+                                    (supplier_id, warehouse_id, quantity, purchase_date))
+            elif table == 'product':
+                product_name = input("Enter product name: ")
+                brand = input("Enter brand: ")
+                category = input("Enter category: ")
+                cost_price = float(input("Enter cost price: "))
+                supplier_id = int(input("Enter supplier ID: "))
+                nutrition_id = int(input("Enter nutrition ID: "))
+                self.cursor.execute("""INSERT INTO product
+                                    (product_name, brand, category, cost_price, supplier_id, nutrition_id) 
+                                    VALUES (?, ?, ?, ?, ?, ?)""", 
+                                    (product_name, brand, category, cost_price, supplier_id, nutrition_id))
+            elif table == 'warehouse_inventory':
+                warehouse_id = int(input("Enter warehouse ID: "))
+                quantity = int(input("Enter quantity: "))
+                last_updated = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                self.cursor.execute("""INSERT INTO warehouse_inventory 
+                                    (warehouse_id, quantity, last_updated) 
+                                    VALUES (?, ?, ?)""", 
+                                    (warehouse_id, quantity, last_updated))
+            elif table == 'movement':
+                warehouse_id = int(input("Enter warehouse ID: "))
+                location_id = int(input("Enter location ID: "))
+                quantity = int(input("Enter movement quantity: "))
+                movement_date = datetime.datetime.now().strftime("%Y-%m-%d")
+                self.cursor.execute("""INSERT INTO movement 
+                                    (warehouse_id, location_id, quantity, movement_date) 
+                                    VALUES (?, ?, ?, ?)""", 
+                                    (warehouse_id, location_id, quantity, movement_date))
+            elif table == 'location_inventory':
+                location_id = int(input("Enter location ID: "))
+                product_id = int(input("Enter product ID: "))
+                quantity = int(input("Enter quantity: "))
+                last_updated = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                self.cursor.execute("""INSERT INTO location_inventory 
+                                    (location_id, product_id, quantity, last_updated) 
+                                    VALUES (?, ?, ?, ?)""", 
+                                    (location_id, product_id, quantity, last_updated))
+            elif table == 'sales':
+                location_id = int(input("Enter location ID: "))
+                user_id = int(input("Enter user ID: "))
+                quantity = int(input("Enter sales quantity: "))
+                sales_date = datetime.datetime.now().strftime("%Y-%m-%d")
+                self.cursor.execute("""INSERT INTO sales 
+                                    (location_id, user_id, quantity, sales_date) 
+                                    VALUES (?, ?, ?, ?)""", 
+                                    (location_id, user_id, quantity, sales_date))
+            else:
+                # Junction tables
+                if table == 'product_purchased':
+                    product_id = int(input("Enter product ID: "))
+                    purchase_id = int(input("Enter purchase ID: "))
+                    self.cursor.execute("""INSERT INTO product_purchased 
+                                        (product_id, purchase_id) VALUES (?, ?)""", 
+                                        (product_id, purchase_id))
+                elif table == 'warehouse_product':
+                    product_id = int(input("Enter product ID: "))
+                    warehouse_inventory_id = int(input("Enter warehouse inventory ID: "))
+                    self.cursor.execute("""INSERT INTO warehouse_product 
+                                        (product_id, warehouse_inventory_id) VALUES (?, ?)""", 
+                                        (product_id, warehouse_inventory_id))
+                elif table == 'movement_product':
+                    product_id = int(input("Enter product ID: "))
+                    movement_id = int(input("Enter movement ID: "))
+                    self.cursor.execute("""INSERT INTO movement_product 
+                                        (product_id, movement_id) VALUES (?, ?)""", 
+                                        (product_id, movement_id))
+                elif table == 'location_product':
+                    product_id = int(input("Enter product ID: "))
+                    location_inventory_id = int(input("Enter location inventory ID: "))
+                    self.cursor.execute("""INSERT INTO location_product 
+                                        (product_id, location_inventory_id) VALUES (?, ?)""", 
+                                        (product_id, location_inventory_id))
+                elif table == 'sales_product':
+                    product_id = int(input("Enter product ID: "))
+                    sales_id = int(input("Enter sales ID: "))
+                    self.cursor.execute("""INSERT INTO sales_product 
+                                        (product_id, sales_id) VALUES (?, ?)""", 
+                                        (product_id, sales_id))
+            self.conn.commit()
+            print("Record inserted successfully!")
+        except sqlite3.IntegrityError:
+            print(f"Error: Cannot insert {table} record.")
+            print("This could be due to foreign key constraints.")
+            
 
 
-def manage_nutrition(cursor):
-    print("\nManaging Nutrition")
-    fields = ["shelf_life", "serving", "calories", "protein", "fat", "sugar", "carbs"]
-    id_field = "nutrition_id"
-    table = "Nutrition"
-    manage_table(cursor, table, id_field, fields)
-
-def manage_locations(cursor):
-    print("\nManaging Locations")
-    fields = ["location_name", "location_type", "address"]
-    id_field = "location_id"
-    table = "Location"
-    manage_table(cursor, table, id_field, fields)
-
-def manage_warehouses(cursor):
-    print("\nManaging Warehouses")
-    fields = ["warehouse_name", "warehouse_address"]
-    id_field = "warehouse_id"
-    table = "Warehouse"
-    manage_table(cursor, table, id_field, fields)
-
-def manage_suppliers(cursor):
-    print("\nManaging Suppliers")
-    fields = ["supplier_name", "address", "phone_number"]
-    id_field = "supplier_id"
-    table = "Suppliers"
-    manage_table(cursor, table, id_field, fields)
-
-def manage_users(cursor):
-    print("\nManaging Users")
-    fields = ["username", "email", "user_type", "address", "phone_number"]
-    id_field = "user_id"
-    table = "User"
-    manage_table(cursor, table, id_field, fields)
-
-def manage_warehouse_inventory(cursor):
-    print("\nManaging Warehouse Inventory")
-    fields = ["warehouse_id", "product_id", "quantity", "last_updated"]
-    id_field = "warehouse_id"
-    table = "WarehouseInventory"
-    manage_table(cursor, table, id_field, fields, composite=True)
-
-def manage_location_inventory(cursor):
-    print("\nManaging Location Inventory")
-    fields = ["location_id", "product_id", "quantity", "last_updated"]
-    id_field = "location_id"
-    table = "LocationInventory"
-    manage_table(cursor, table, id_field, fields, composite=True)
-
-def manage_transactions(cursor):
-    print("\nManaging Transactions")
-    fields = ["location_id", "user_id", "product_id", "quantity", "transaction_date"]
-    id_field = "transaction_id"
-    table = "Transactions"
-    manage_table(cursor, table, id_field, fields)
-
-def manage_purchases(cursor):
-    print("\nManaging Purchases")
-    fields = ["supplier_id", "warehouse_id", "product_id", "quantity", "purchase_date"]
-    id_field = "purchase_id"
-    table = "Purchases"
-    manage_table(cursor, table, id_field, fields)
-
-def manage_returns(cursor):
-    print("\nManaging Returns")
-    fields = ["supplier_id", "warehouse_id", "product_id", "quantity", "return_date"]
-    id_field = "return_id"
-    table = "Returns"
-    manage_table(cursor, table, id_field, fields)
-
-def manage_movements(cursor):
-    print("\nManaging Movements")
-    fields = ["warehouse_id", "location_id", "product_id", "quantity", "movement_date"]
-    id_field = "movement_id"
-    table = "Movement"
-    manage_table(cursor, table, id_field, fields)
-
-# Helper function for table operations
-def manage_table(cursor, table, id_field, fields, composite=False):
-    print(f"\n1. Add {table}")
-    print(f"2. Update {table}")
-    print(f"3. Delete {table}")
-    choice = input("Enter your choice: ")
-
-    if choice == "1":
-        add_record(cursor, table, fields)
-    elif choice == "2":
-        id_value = input(f"Enter {id_field} to update: ")
-        update_record(cursor, table, id_field, id_value, fields)
-    elif choice == "3":
-        delete_record(cursor, table, id_field)
-    else:
-        print("Invalid choice.")
-
-# Display table
-def display_table(cursor):
-    print("\nSelect what table to display.")
-    print("1. Products")
-    print("2. Nutrition")
-    print("3. Locations")
-    print("4. Warehouses")
-    print("5. Suppliers")
-    print("6. Users")
-    print("7. Warehouse Inventory")
-    print("8. Location Inventory")
-    print("9. Transactions")
-    print("10. Purchases")
-    print("11. Returns")
-    print("12. Movements")
-
-    choice = input("Enter your choice: ")
-
-    if choice == "1":
-        table = "Products"
-        display_table_contents(table,cursor)
-    elif choice == "2":
-        table = "Nutrition"
-        display_table_contents(table,cursor)
-    elif choice == "3":
-        table = "Location"
-        display_table_contents(table,cursor)
-    elif choice == "4":
-        table = "Warehouse"
-        display_table_contents(table,cursor)
-    elif choice == "5":
-        table = "Suppliers"
-        display_table_contents(table,cursor)
-    elif choice == "6":
-        table = "User"
-        display_table_contents(table,cursor)
-    elif choice == "7":
-        table = "WarehouseInventory"
-        display_table_contents(table,cursor)
-    elif choice == "8":
-        table = "LocationInventory"
-        display_table_contents(table,cursor)
-    elif choice == "9":
-        table = "Transactions"
-        display_table_contents(table,cursor)
-    elif choice == "10":
-        table = "Purchases"
-        display_table_contents(table,cursor)
-    elif choice == "11":
-        table = "Returns"
-        display_table_contents(table,cursor)
-    elif choice == "12":
-        table = "Movement"
-        display_table_contents(table,cursor)
-    else:
-        print("Invalid choice.")
-    
-# Display table contents
-def display_table_contents(table,cursor):
-    #conn = sqlite3.connect("speedy_eats.db")
-    #cursor = conn.cursor()
-    try:
-        cursor.execute(f"SELECT * FROM {table}")
-        rows = cursor.fetchall()
-        if rows:
-            print(f"\nContents of {table}:")
-            for row in rows:
-                print(row)
+    def update_record(self, table):
+        print(f"\nUpdating record in {table}")
+        
+        id_column = f"{table}_id"
+        record_id = int(input(f"Enter {table} ID to update: "))
+        
+        if table == 'supplier':
+            name = input("Enter new supplier name (press enter to skip): ")
+            address = input("Enter new supplier address (press enter to skip): ")
+            
+            if name:
+                self.cursor.execute(f"UPDATE {table} SET name = ? WHERE {id_column} = ?", (name, record_id))
+            if address:
+                self.cursor.execute(f"UPDATE {table} SET address = ? WHERE {id_column} = ?", (address, record_id))
+        
+        elif table == 'product':
+            fields = ['product_name', 'brand', 'category', 'cost_price', 'supplier_id', 'nutrition_id']
+            updates = {}
+            
+            for field in fields:
+                value = input(f"Enter new {field} (press enter to skip): ")
+                if value:
+                    updates[field] = value
+            
+            if updates:
+                set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
+                values = list(updates.values()) + [record_id]
+                self.cursor.execute(f"UPDATE {table} SET {set_clause} WHERE {id_column} = ?", values)
+        
         else:
-            print(f"\nNo data found in {table}.")
-    except Exception as e:
-        print(f"An error occurred while displaying {table}: {e}")
+            # Dynamically handle updates for other tables
+            columns = [desc[0] for desc in self.cursor.execute(f"PRAGMA table_info({table})") if desc[0] != id_column]
+            
+            updates = {}
+            for column in columns:
+                value = input(f"Enter new {column} (press enter to skip): ")
+                if value:
+                    updates[column] = value
+            
+            if updates:
+                set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
+                values = list(updates.values()) + [record_id]
+                self.cursor.execute(f"UPDATE {table} SET {set_clause} WHERE {id_column} = ?", values)
 
-# Main menu
+        self.conn.commit()
+        print("Record updated successfully!")
+
+    def delete_record(self, table):
+        print(f"\nDeleting record from {table}")
+        dict_ids = {"product_purchased":["product_id", "purchase_id"], "warehouse_product":["product_id", "warehouse_inventory_id"], 
+        "movement_product":["product_id", "movement_id"], "location_product":["product_id", "location_inventory_id"], 
+        "sales_product":["product_id", "sales_id"]}
+        if table == "product_purchased" or table == "warehouse_product" or table == 'movement_product' or table == 'location_product' or table == 'sales_product':
+            id_column = dict_ids[table]
+            
+            try:
+                # Get the record ID to delete
+                record_id1 = int(input(f"Enter {table} {id_column[0]} to delete: "))
+                record_id2 = int(input(f"Enter {table} {id_column[1]} ID to delete: "))
+                
+                # First, check if the record exists
+                self.cursor.execute(f"SELECT * FROM {table} WHERE {id_column[0]} = ? AND {id_column[1]} = ?", (record_id1, record_id2))
+                existing_record = self.cursor.fetchone()
+                
+                if not existing_record:
+                    print(f"No {table} record found with IDs {record_id1} and {record_id2}")
+                    return
+                
+                # Confirm deletion
+                confirm = input(f"Are you sure you want to delete {table} record with IDs {record_id1} and {record_id2}? (yes/no): ").lower()
+                
+                if confirm != 'yes':
+                    print("Deletion cancelled.")
+                    return
+                
+                # Attempt to delete the record
+                self.cursor.execute(f"DELETE FROM {table} WHERE {id_column[0]} = ? AND {id_column[1]} = ?", (record_id1, record_id2))
+                
+                # Check if any rows were actually deleted
+                if self.cursor.rowcount > 0:
+                    self.conn.commit()
+                    print(f"Successfully deleted record with IDs {record_id1} and {record_id2} from {table}")
+                else:
+                    print(f"No record found with IDs {record_id1} and {record_id2} in {table}")
+            
+            except sqlite3.IntegrityError:
+                print(f"Error: Cannot delete {table} record. It may be referenced by other tables.")
+                print("This could be due to foreign key constraints.")
+            
+            except ValueError:
+                print("Invalid ID. Please enter a valid numeric ID.")
+            
+            except sqlite3.Error as e:
+                self.conn.rollback()
+                print(f"An error occurred while deleting the record: {e}")
+
+        else:
+        
+            ###
+            id_column = f"{table}_id"
+            
+            try:
+                # Get the record ID to delete
+                record_id = int(input(f"Enter {table} ID to delete: "))
+                
+                # First, check if the record exists
+                self.cursor.execute(f"SELECT * FROM {table} WHERE {id_column} = ?", (record_id,))
+                existing_record = self.cursor.fetchone()
+                
+                if not existing_record:
+                    print(f"No {table} record found with ID {record_id}")
+                    return
+                
+                # Confirm deletion
+                confirm = input(f"Are you sure you want to delete {table} record with ID {record_id}? (yes/no): ").lower()
+                
+                if confirm != 'yes':
+                    print("Deletion cancelled.")
+                    return
+                
+                # Attempt to delete the record
+                self.cursor.execute(f"DELETE FROM {table} WHERE {id_column} = ?", (record_id,))
+                
+                # Check if any rows were actually deleted
+                if self.cursor.rowcount > 0:
+                    self.conn.commit()
+                    print(f"Successfully deleted record with ID {record_id} from {table}")
+                else:
+                    print(f"No record found with ID {record_id} in {table}")
+            
+            except sqlite3.IntegrityError:
+                print(f"Error: Cannot delete {table} record. It may be referenced by other tables.")
+                print("This could be due to foreign key constraints.")
+            
+            except ValueError:
+                print("Invalid ID. Please enter a valid numeric ID.")
+            
+            except sqlite3.Error as e:
+                self.conn.rollback()
+                print(f"An error occurred while deleting the record: {e}")
+
+
+    def display_record(self, table):
+        print(f"\nDisplaying records from {table}")
+        
+        try:
+            # Fetch all columns dynamically
+            self.cursor.execute(f"PRAGMA table_info({table})")
+            columns = [column[1] for column in self.cursor.fetchall()]
+            
+            # Display column names
+            print(" | ".join(columns))
+            print("-" * (len(" | ".join(columns))))
+            
+            # Fetch and display all records
+            self.cursor.execute(f"SELECT * FROM {table}")
+            records = self.cursor.fetchall()
+            
+            if not records:
+                print("No records found.")
+                return
+            
+            for record in records:
+                print(" | ".join(str(item) for item in record))
+        
+        except sqlite3.Error as e:
+            print(f"An error occurred: {e}")
+
+
+
 def main():
-    connection = connect_db()
-    cursor = connection.cursor()
+    inventory_system = InventoryManagement()
 
     while True:
-        print("\nSpeedy Eats Database Management")
-        print("1. Manage Products")
-        print("2. Manage Nutrition")
-        print("3. Manage Locations")
-        print("4. Manage Warehouses")
-        print("5. Manage Suppliers")
-        print("6. Manage Users")
-        print("7. Manage Warehouse Inventory")
-        print("8. Manage Location Inventory")
-        print("9. Manage Transactions")
-        print("10. Manage Purchases")
-        print("11. Manage Returns")
-        print("12. Manage Movements")
-        print("13. Display tables")
-        print("14. Exit")
-        choice = input("Enter your choice: ")
+        print("\n--- Inventory Management System ---")
+        print("1. Insert Record")
+        print("2. Update Record")
+        print("3. Delete Record")
+        print("4. Display Records")
+        print("5. Exit")
+        
+        choice = input("Enter your choice (1-5): ")
+        
+        if choice == '5':
+            print("Exiting the system...")
+            break
+        
+        if choice in ['1', '2', '3', '4']:
+            print("\nSelect Table:")
+            for i, table in enumerate(inventory_system.tables, 1):
+                print(f"{i}. {table}")
+            
+            table_choice = input("Enter table number: ")
+            
+            try:
+                selected_table = inventory_system.tables[int(table_choice) - 1]
+                
+                if choice == '1':
+                    inventory_system.insert_record(selected_table)
+                elif choice == '2':
+                    inventory_system.update_record(selected_table)
+                elif choice == '3':
+                    inventory_system.delete_record(selected_table)
+                elif choice == '4':
+                    inventory_system.display_record(selected_table)
+            
+            except (ValueError, IndexError):
+                print("Invalid table selection!")
+        
+        else:
+            print("Invalid choice. Please try again.")
 
-        try:
-            if choice == "1":
-                manage_products(cursor)
-            elif choice == "2":
-                manage_nutrition(cursor)
-            elif choice == "3":
-                manage_locations(cursor)
-            elif choice == "4":
-                manage_warehouses(cursor)
-            elif choice == "5":
-                manage_suppliers(cursor)
-            elif choice == "6":
-                manage_users(cursor)
-            elif choice == "7":
-                manage_warehouse_inventory(cursor)
-            elif choice == "8":
-                manage_location_inventory(cursor)
-            elif choice == "9":
-                manage_transactions(cursor)
-            elif choice == "10":
-                manage_purchases(cursor)
-            elif choice == "11":
-                manage_returns(cursor)
-            elif choice == "12":
-                manage_movements(cursor)
-            elif choice == "13":
-                display_table(cursor)
-            elif choice == "14":
-                connection.commit()
-                connection.close()
-                print("Goodbye!")
-                break
-            else:
-                print("Invalid choice. Please try again.")
-
-            # Commit after every operation
-            connection.commit()
-
-        except Exception as e:
-            print(f"An error occurred: {e}")
-            connection.rollback()
-
-# Run the main menu
 if __name__ == "__main__":
-    create_tables()
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nProgram terminated by user.")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
