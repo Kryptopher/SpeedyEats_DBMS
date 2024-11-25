@@ -66,7 +66,7 @@ class InventoryManagement:
             purchase_id INTEGER PRIMARY KEY,
             supplier_id INTEGER,
             warehouse_id INTEGER,
-            quantity INTEGER,
+            quantity INTEGER CHECK(quantity > 0),
             purchase_date TEXT,
             FOREIGN KEY(supplier_id) REFERENCES supplier(supplier_id),
             FOREIGN KEY(warehouse_id) REFERENCES warehouse(warehouse_id)
@@ -78,7 +78,7 @@ class InventoryManagement:
             product_name TEXT,
             brand TEXT,
             category TEXT,
-            cost_price REAL,
+            cost_price REAL CHECK(cost_price > 0),
             supplier_id INTEGER,
             nutrition_id INTEGER,
             FOREIGN KEY(supplier_id) REFERENCES supplier(supplier_id) ON DELETE RESTRICT,
@@ -89,7 +89,7 @@ class InventoryManagement:
         self.cursor.execute('''CREATE TABLE IF NOT EXISTS warehouse_inventory (
             warehouse_inventory_id INTEGER PRIMARY KEY,
             warehouse_id INTEGER,
-            quantity INTEGER,
+            quantity INTEGER CHECK(quantity >= 0),
             last_updated TEXT,
             FOREIGN KEY(warehouse_id) REFERENCES warehouse(warehouse_id)
         )''')
@@ -99,17 +99,39 @@ class InventoryManagement:
             movement_id INTEGER PRIMARY KEY,
             warehouse_id INTEGER,
             location_id INTEGER,
-            quantity INTEGER,
+            quantity INTEGER CHECK(quantity > 0),
             movement_date TEXT,
             FOREIGN KEY(warehouse_id) REFERENCES warehouse(warehouse_id),
             FOREIGN KEY(location_id) REFERENCES location(location_id)
         )''')
 
+        self.cursor.execute('''
+            CREATE TRIGGER IF NOT EXISTS check_and_update_movement_quantity
+            BEFORE INSERT ON movement
+            FOR EACH ROW
+            BEGIN
+                -- Check if the movement quantity exceeds available inventory
+                SELECT CASE
+                    WHEN NEW.quantity > (
+                        SELECT quantity FROM warehouse_inventory
+                        WHERE warehouse_id = NEW.warehouse_id
+                    ) THEN
+                        RAISE(ABORT, 'Movement quantity exceeds available inventory in warehouse.')
+                END;
+
+                -- Update the warehouse inventory to reduce the quantity by the movement amount
+                UPDATE warehouse_inventory
+                SET quantity = quantity - NEW.quantity
+                WHERE warehouse_id = NEW.warehouse_id;
+            END;
+        ''')
+
+
         # Location Inventory Table
         self.cursor.execute('''CREATE TABLE IF NOT EXISTS location_inventory (
             location_inventory_id INTEGER PRIMARY KEY,
             location_id INTEGER,
-            quantity INTEGER,
+            quantity INTEGER CHECK(quantity >= 0),
             last_updated TEXT,
             FOREIGN KEY(location_id) REFERENCES location(location_id)
         )''')
@@ -119,7 +141,7 @@ class InventoryManagement:
             sales_id INTEGER PRIMARY KEY,
             location_id INTEGER,
             user_id INTEGER,
-            quantity INTEGER,
+            quantity INTEGER CHECK(quantity > 0),
             sales_date TEXT,
             FOREIGN KEY(location_id) REFERENCES location(location_id),
             FOREIGN KEY(user_id) REFERENCES user(user_id)
