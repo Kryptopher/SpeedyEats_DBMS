@@ -3,7 +3,7 @@ import datetime
 
 
 class InventoryManagement:
-    def __init__(self, db_name='inventory.db'):
+    def __init__(self, db_name='inventory2.db'):
         self.conn = sqlite3.connect(db_name)
         self.cursor = self.conn.cursor()
         self.cursor.execute("PRAGMA foreign_keys = ON")
@@ -66,7 +66,6 @@ class InventoryManagement:
             purchase_id INTEGER PRIMARY KEY,
             supplier_id INTEGER,
             warehouse_id INTEGER,
-            quantity INTEGER CHECK(quantity > 0),
             purchase_date TEXT,
             FOREIGN KEY(supplier_id) REFERENCES supplier(supplier_id),
             FOREIGN KEY(warehouse_id) REFERENCES warehouse(warehouse_id)
@@ -89,7 +88,6 @@ class InventoryManagement:
         self.cursor.execute('''CREATE TABLE IF NOT EXISTS warehouse_inventory (
             warehouse_inventory_id INTEGER PRIMARY KEY,
             warehouse_id INTEGER,
-            quantity INTEGER CHECK(quantity >= 0),
             last_updated TEXT,
             FOREIGN KEY(warehouse_id) REFERENCES warehouse(warehouse_id)
         )''')
@@ -99,39 +97,18 @@ class InventoryManagement:
             movement_id INTEGER PRIMARY KEY,
             warehouse_id INTEGER,
             location_id INTEGER,
-            quantity INTEGER CHECK(quantity > 0),
             movement_date TEXT,
             FOREIGN KEY(warehouse_id) REFERENCES warehouse(warehouse_id),
             FOREIGN KEY(location_id) REFERENCES location(location_id)
         )''')
 
-        self.cursor.execute('''
-            CREATE TRIGGER IF NOT EXISTS check_and_update_movement_quantity
-            BEFORE INSERT ON movement
-            FOR EACH ROW
-            BEGIN
-                -- Check if the movement quantity exceeds available inventory
-                SELECT CASE
-                    WHEN NEW.quantity > (
-                        SELECT quantity FROM warehouse_inventory
-                        WHERE warehouse_id = NEW.warehouse_id
-                    ) THEN
-                        RAISE(ABORT, 'Movement quantity exceeds available inventory in warehouse.')
-                END;
 
-                -- Update the warehouse inventory to reduce the quantity by the movement amount
-                UPDATE warehouse_inventory
-                SET quantity = quantity - NEW.quantity
-                WHERE warehouse_id = NEW.warehouse_id;
-            END;
-        ''')
 
 
         # Location Inventory Table
         self.cursor.execute('''CREATE TABLE IF NOT EXISTS location_inventory (
             location_inventory_id INTEGER PRIMARY KEY,
             location_id INTEGER,
-            quantity INTEGER CHECK(quantity >= 0),
             last_updated TEXT,
             FOREIGN KEY(location_id) REFERENCES location(location_id)
         )''')
@@ -141,7 +118,6 @@ class InventoryManagement:
             sales_id INTEGER PRIMARY KEY,
             location_id INTEGER,
             user_id INTEGER,
-            quantity INTEGER CHECK(quantity > 0),
             sales_date TEXT,
             FOREIGN KEY(location_id) REFERENCES location(location_id),
             FOREIGN KEY(user_id) REFERENCES user(user_id)
@@ -153,6 +129,7 @@ class InventoryManagement:
         self.cursor.execute('''CREATE TABLE IF NOT EXISTS product_purchased (
             product_id INTEGER,
             purchase_id INTEGER,
+            quantity INTEGER CHECK(quantity > 0),
             PRIMARY KEY(product_id, purchase_id),
             FOREIGN KEY(product_id) REFERENCES product(product_id) ON DELETE RESTRICT,
             FOREIGN KEY(purchase_id) REFERENCES purchase(purchase_id) ON DELETE CASCADE
@@ -161,6 +138,7 @@ class InventoryManagement:
         self.cursor.execute('''CREATE TABLE IF NOT EXISTS warehouse_product (
             product_id INTEGER,
             warehouse_inventory_id INTEGER,
+            quantity INTEGER CHECK(quantity >= 0),
             PRIMARY KEY(product_id, warehouse_inventory_id),
             FOREIGN KEY(product_id) REFERENCES product(product_id),
             FOREIGN KEY(warehouse_inventory_id) REFERENCES warehouse_inventory(warehouse_inventory_id)
@@ -169,14 +147,49 @@ class InventoryManagement:
         self.cursor.execute('''CREATE TABLE IF NOT EXISTS movement_product (
             product_id INTEGER,
             movement_id INTEGER,
+            quantity INTEGER CHECK(quantity > 0),
             PRIMARY KEY(product_id, movement_id),
             FOREIGN KEY(product_id) REFERENCES product(product_id),
             FOREIGN KEY(movement_id) REFERENCES movement(movement_id)
         )''')
 
+        # Create the trigger after creating the table
+        self.cursor.execute('''
+            CREATE TRIGGER IF NOT EXISTS reduce_warehouse_quantity
+            BEFORE INSERT ON movement_product
+            FOR EACH ROW
+            BEGIN
+                -- Check if there is enough quantity in the warehouse
+                SELECT CASE
+                    WHEN (SELECT quantity
+                        FROM warehouse_product
+                        WHERE product_id = NEW.product_id
+                            AND warehouse_inventory_id = (SELECT warehouse_inventory_id
+                                                        FROM warehouse_inventory
+                                                        WHERE warehouse_id = (SELECT warehouse_id
+                                                                                FROM movement
+                                                                                WHERE movement_id = NEW.movement_id))) < NEW.quantity THEN
+                        RAISE (ABORT, 'Insufficient quantity in warehouse to complete the movement')
+                END;
+
+                -- Deduct the quantity from the warehouse_product table
+                UPDATE warehouse_product
+                SET quantity = quantity - NEW.quantity
+                WHERE product_id = NEW.product_id
+                AND warehouse_inventory_id = (SELECT warehouse_inventory_id
+                                                FROM warehouse_inventory
+                                                WHERE warehouse_id = (SELECT warehouse_id
+                                                                    FROM movement
+                                                                    WHERE movement_id = NEW.movement_id));
+            END;
+        ''')
+
+
+
         self.cursor.execute('''CREATE TABLE IF NOT EXISTS location_product (
             product_id INTEGER,
             location_inventory_id INTEGER,
+            quantity INTEGER CHECK(quantity >= 0),
             PRIMARY KEY(product_id, location_inventory_id),
             FOREIGN KEY(product_id) REFERENCES product(product_id),
             FOREIGN KEY(location_inventory_id) REFERENCES location_inventory(location_inventory_id)
@@ -185,6 +198,7 @@ class InventoryManagement:
         self.cursor.execute('''CREATE TABLE IF NOT EXISTS sales_product (
             product_id INTEGER,
             sales_id INTEGER,
+            quantity INTEGER CHECK(quantity > 0),
             PRIMARY KEY(product_id, sales_id),
             FOREIGN KEY(product_id) REFERENCES product(product_id),
             FOREIGN KEY(sales_id) REFERENCES sales(sales_id)
@@ -237,12 +251,12 @@ class InventoryManagement:
             elif table == 'purchase':
                 supplier_id = int(input("Enter supplier ID: "))
                 warehouse_id = int(input("Enter warehouse ID: "))
-                quantity = int(input("Enter purchase quantity: "))
+                
                 purchase_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 self.cursor.execute("""INSERT INTO purchase 
-                                    (supplier_id, warehouse_id, quantity, purchase_date) 
-                                    VALUES (?, ?, ?, ?)""", 
-                                    (supplier_id, warehouse_id, quantity, purchase_date))
+                                    (supplier_id, warehouse_id, purchase_date) 
+                                    VALUES (?, ?, ?)""", 
+                                    (supplier_id, warehouse_id, purchase_date))
             elif table == 'product':
                 product_name = input("Enter product name: ")
                 brand = input("Enter brand: ")
@@ -256,70 +270,75 @@ class InventoryManagement:
                                     (product_name, brand, category, cost_price, supplier_id, nutrition_id))
             elif table == 'warehouse_inventory':
                 warehouse_id = int(input("Enter warehouse ID: "))
-                quantity = int(input("Enter quantity: "))
+                
                 last_updated = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 self.cursor.execute("""INSERT INTO warehouse_inventory 
-                                    (warehouse_id, quantity, last_updated) 
-                                    VALUES (?, ?, ?)""", 
-                                    (warehouse_id, quantity, last_updated))
+                                    (warehouse_id, last_updated) 
+                                    VALUES (?, ?)""", 
+                                    (warehouse_id, last_updated))
             elif table == 'movement':
                 warehouse_id = int(input("Enter warehouse ID: "))
                 location_id = int(input("Enter location ID: "))
-                quantity = int(input("Enter movement quantity: "))
+                
                 movement_date = datetime.datetime.now().strftime("%Y-%m-%d")
                 self.cursor.execute("""INSERT INTO movement 
-                                    (warehouse_id, location_id, quantity, movement_date) 
-                                    VALUES (?, ?, ?, ?)""", 
-                                    (warehouse_id, location_id, quantity, movement_date))
+                                    (warehouse_id, location_id, movement_date) 
+                                    VALUES (?, ?, ?)""", 
+                                    (warehouse_id, location_id, movement_date))
             elif table == 'location_inventory':
                 location_id = int(input("Enter location ID: "))
                 
-                quantity = int(input("Enter quantity: "))
+                
                 last_updated = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 self.cursor.execute("""INSERT INTO location_inventory 
-                                    (location_id, quantity, last_updated) 
-                                    VALUES (?, ?, ?)""", 
-                                    (location_id, quantity, last_updated))
+                                    (location_id, last_updated) 
+                                    VALUES (?, ?)""", 
+                                    (location_id, last_updated))
             elif table == 'sales':
                 location_id = int(input("Enter location ID: "))
                 user_id = int(input("Enter user ID: "))
-                quantity = int(input("Enter sales quantity: "))
+                
                 sales_date = datetime.datetime.now().strftime("%Y-%m-%d")
                 self.cursor.execute("""INSERT INTO sales 
-                                    (location_id, user_id, quantity, sales_date) 
-                                    VALUES (?, ?, ?, ?)""", 
-                                    (location_id, user_id, quantity, sales_date))
+                                    (location_id, user_id, sales_date) 
+                                    VALUES (?, ?, ?)""", 
+                                    (location_id, user_id, sales_date))
             else:
                 # Junction tables
                 if table == 'product_purchased':
                     product_id = int(input("Enter product ID: "))
                     purchase_id = int(input("Enter purchase ID: "))
+                    quantity = int(input("Enter purchase quantity: "))
                     self.cursor.execute("""INSERT INTO product_purchased 
-                                        (product_id, purchase_id) VALUES (?, ?)""", 
-                                        (product_id, purchase_id))
+                                        (product_id, purchase_id, quantity) VALUES (?, ?, ?)""", 
+                                        (product_id, purchase_id, quantity))
                 elif table == 'warehouse_product':
                     product_id = int(input("Enter product ID: "))
                     warehouse_inventory_id = int(input("Enter warehouse inventory ID: "))
+                    quantity = int(input("Enter quantity: "))
                     self.cursor.execute("""INSERT INTO warehouse_product 
-                                        (product_id, warehouse_inventory_id) VALUES (?, ?)""", 
-                                        (product_id, warehouse_inventory_id))
+                                        (product_id, warehouse_inventory_id, quantity) VALUES (?, ?, ?)""", 
+                                        (product_id, warehouse_inventory_id, quantity))
                 elif table == 'movement_product':
                     product_id = int(input("Enter product ID: "))
                     movement_id = int(input("Enter movement ID: "))
+                    quantity = int(input("Enter movement quantity: "))
                     self.cursor.execute("""INSERT INTO movement_product 
-                                        (product_id, movement_id) VALUES (?, ?)""", 
-                                        (product_id, movement_id))
+                                        (product_id, movement_id, quantity) VALUES (?, ?, ?)""", 
+                                        (product_id, movement_id, quantity))
                 elif table == 'location_product':
                     product_id = int(input("Enter product ID: "))
                     location_inventory_id = int(input("Enter location inventory ID: "))
+                    quantity = int(input("Enter quantity: "))
                     self.cursor.execute("""INSERT INTO location_product 
-                                        (product_id, location_inventory_id) VALUES (?, ?)""", 
-                                        (product_id, location_inventory_id))
+                                        (product_id, location_inventory_id, quantity) VALUES (?, ?, ?)""", 
+                                        (product_id, location_inventory_id, quantity))
                 elif table == 'sales_product':
                     product_id = int(input("Enter product ID: "))
                     sales_id = int(input("Enter sales ID: "))
+                    quantity = int(input("Enter sales quantity: "))
                     self.cursor.execute("""INSERT INTO sales_product 
-                                        (product_id, sales_id) VALUES (?, ?)""", 
+                                        (product_id, sales_id, quantity) VALUES (?, ?, ?)""", 
                                         (product_id, sales_id))
             self.conn.commit()
             print("Record inserted successfully!")
