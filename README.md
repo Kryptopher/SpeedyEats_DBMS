@@ -7,6 +7,8 @@ Repo Content:
 1. inventory-final2.db is the database for SpeedyEats.
 2. test.py has set of 5 test queries with other print statements to check if the database is working as expected.
 3. main.py is a CLI to interact with the database.
+4. run-test.sh, executable to run tests. 
+5. run-main.sh, executable to run CLI.
 
 Requirements:
 
