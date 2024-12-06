@@ -16,10 +16,11 @@ Requirements:
 
 Run:
 
-1. To run test queries:
+1. git clone https://github.com/Kryptopher/SpeedyEats_DBMS.git
+2. cd SpeedyEats_DBMS 
+3. To run test queries:
     ./run-test.sh
-    
-2. To run CLI:
+4. To run CLI:
     ./run-main.sh
 
 
